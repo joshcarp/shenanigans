@@ -1,0 +1,219 @@
+# Python Formatting in 2025: Ruff's Clean Sweep
+
+**The short answer: Use Ruff alone.** The Python community has decisively shifted toward Ruff as an all-in-one solution that replaces Black, isort, and Flake8. [GitHub +3](https://github.com/astral-sh/ruff) It's 30x faster than Black, achieves >99.9% compatibility, [GitHub](https://github.com/astral-sh/ruff/discussions/7310) [Astral](https://astral.sh/blog/the-ruff-formatter) and eliminates the conflicts you're experiencing. [GitHub](https://github.com/astral-sh/ruff/blob/main/README.md) [Astral](https://astral.sh/blog/the-ruff-formatter) Major projects like FastAPI, pandas, Apache Airflow, and even Pylint itself have migrated successfully. [Crmarsh +5](https://notes.crmarsh.com/ruff-the-first-200-releases)
+
+Here's why you're hitting conflicts and how to resolve them, with production-ready configurations for both approaches.
+
+## Why you're experiencing conflicts
+
+When combining Ruff's linter with Black and isort, three primary conflicts emerge. **E501 (line-too-long)** is the most common culprit—Black and Ruff's formatter make "best-effort" attempts at wrapping lines but can't reformat everything (long strings, URLs, comments). Ruff's linter then flags these violations. [Astral](https://docs.astral.sh/ruff/faq/) [Stack Overflow](https://stackoverflow.com/questions/77396198/how-to-auto-format-e501-line-too-long-89-88-characters-in-pre-commit) **E203 (whitespace before ':')** conflicts with Black's slice formatting per PEP 8. Additionally, several Ruff linter rules directly conflict with formatter behavior: W191 (tab-indentation), the Q-series (quote style rules), and COM812/819 (trailing comma rules). [astral](https://docs.astral.sh/ruff/formatter/) [Astral](https://docs.astral.sh/ruff/formatter/)
+
+For import sorting, Ruff groups non-aliased imports from the same module differently than isort, [Astral](https://docs.astral.sh/ruff/faq/) and five isort settings are fundamentally incompatible with Ruff's formatter: `force-single-line`, `force-wrap-aliases`, `split-on-trailing-comma`, and certain values for `lines-after-imports` and `lines-between-types`. [Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md)
+
+## The modern approach: Ruff-only configuration
+
+This is the **recommended production setup for 2024-2025**. It's minimal, strict, easy to understand, and eliminates all conflicts:
+
+```toml
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable pycodestyle, pyflakes, isort rules
+select = ["E", "F", "I"]
+# E501: Line length handled by formatter
+ignore = ["E501"]
+
+# Allow auto-fixing for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+# Per-file customization
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__ files
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["yourpackage"]
+```
+
+**Usage commands:**
+```bash
+# Format code (import sorting + formatting)
+ruff check --select I --fix .  # Sort imports first
+ruff format .                   # Then format
+
+# Check in CI/CD
+ruff check .
+ruff format --check .
+```
+
+**Pre-commit configuration:**
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.0
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+```
+
+This eliminates **6-12 dependencies** (Black, isort, Flake8, various plugins), reduces your configuration to a single section, and runs in milliseconds instead of seconds. Apache Airflow reduced pre-commit time from 1m40s to 6s with this approach. [Crmarsh](https://notes.crmarsh.com/ruff-the-first-200-releases)
+
+## The comprehensive production configuration
+
+For projects needing stricter checks with additional rule sets:
+
+```toml
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = [".git", ".venv", "__pycache__", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear (common bugs)
+    "UP",   # pyupgrade (modern Python syntax)
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # Ruff-specific rules
+]
+
+ignore = [
+    "E501",  # Line length handled by formatter
+]
+
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**/*.py" = ["S101"]  # Allow assert in tests
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true  # Format code examples in docstrings
+docstring-code-line-length = 72
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint.isort]
+known-first-party = ["yourpackage"]
+combine-as-imports = true
+```
+
+This configuration is **production-ready, strict, and comprehensive** while remaining easy to understand. It's based on patterns from FastAPI and pandas.
+
+## If you must use multiple tools (transition strategy)
+
+Only use this approach if you're gradually migrating from existing Black/isort setups:
+
+```toml
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+# Use Ruff ONLY for linting, not formatting
+select = ["E", "F", "B", "UP"]
+
+# Critical: Ignore rules that conflict with Black
+ignore = [
+    "E501",   # Let Black handle line length
+    "E203",   # Conflicts with Black's slice formatting
+    "W191",   # tab-indentation
+    "E111",   # indentation-with-invalid-multiple
+    "E114",   # indentation-with-invalid-multiple-comment
+    "E117",   # over-indented
+    "D206",   # docstring-tab-indentation
+    "D300",   # triple-single-quotes
+    "Q000",   # bad-quotes-inline-string
+    "Q001",   # bad-quotes-multiline-string
+    "Q002",   # bad-quotes-docstring
+    "Q003",   # avoidable-escaped-quote
+    "COM812", # missing-trailing-comma
+    "COM819", # prohibited-trailing-comma
+    "ISC001", # single-line-implicit-string-concatenation
+]
+
+# Only auto-fix safe rules
+fixable = ["F401", "UP"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+```
+
+**Critical warnings for this approach:**
+- You must keep `line-length` **identical** across all three tools [Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md)
+- Run tools in order: `isort . && ruff check --fix . && black .`
+- This requires **3x more dependencies** and runs significantly slower
+- Maintenance overhead increases with three separate tools to update
+
+According to Ruff's official documentation: *"The formatter is not intended to be used interchangeably with Black on an ongoing basis"*— [GitHub](https://github.com/astral-sh/ruff/discussions/10138)  [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md) combining them creates the conflicts you're experiencing. [Astral](https://docs.astral.sh/ruff/faq/) [Astral](https://docs.astral.sh/ruff/formatter/)
+
+## Technical details: What differs between Ruff and Black
+
+Ruff achieves **>99.9% compatibility** with Black. On Django (2,772 files), only 34 files differ. [GitHub +3](https://github.com/astral-sh/ruff/discussions/7310) The intentional differences:
+
+**Trailing end-of-line comments**: Ruff preserves developer intent by expanding statements with trailing comments, while Black collapses them. [Astral](https://docs.astral.sh/ruff/formatter/black/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/formatter/black.md) **Pragma comments**: Ruff intelligently excludes `# type`, `# noqa`, `# pyright` comments from line-width calculations. [Astral](https://docs.astral.sh/ruff/formatter/black/) **F-string formatting**: Ruff formats expressions inside f-strings; Black doesn't. [Astral](https://docs.astral.sh/ruff/formatter/) **Unicode width handling**: Ruff uses Unicode width for all tokens (more accurate for international characters); Black only does this for strings. [Astral](https://docs.astral.sh/ruff/formatter/black/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/formatter/black.md)
+
+These differences are intentional improvements that rarely affect most codebases.
+
+## Import sorting: Ruff vs isort specifics
+
+Ruff's import sorting runs through its **linter** (the `I` rules), not the formatter. It's designed to match isort with `profile = "black"` and is compatible with Black's formatting. [Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md)
+
+**Key difference**: Ruff groups non-aliased imports from the same module together:
+```python
+# Ruff groups these
+from numpy import cos, int8, tan, uint8
+from numpy import sin as np_sin
+
+# isort separates them
+from numpy import cos, int8
+from numpy import sin as np_sin  
+from numpy import tan, uint8
+```
+[Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md)
+
+This is considered **more logical** and doesn't affect functionality. Ruff also correctly classifies more standard library modules than isort. [Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md)
+
+**Five isort settings are incompatible** with Ruff's formatter and must be avoided or set to compatible values: `force-single-line`, `force-wrap-aliases`, `split-on-trailing-comma`, `lines-after-imports` (only -1, 1, 2 work), and `lines-between-types` (only 0, 1 work). When incompatible settings are detected, `ruff format` emits warnings. [Astral](https://docs.astral.sh/ruff/formatter/)
+
+## Industry adoption proves production-readiness
+
+**Major projects using Ruff exclusively in 2025**: FastAPI (creator Sebastián Ramírez: "so fast I thought it failed"), pandas (3.35s vs 21.74s for pyupgrade alone), Apache Airflow (1m40s → 6s pre-commit), Pydantic, SciPy, Dagster, Jupyter, Django, and remarkably, **Pylint itself uses Ruff** as a pre-commit hook. [GitHub +2](https://github.com/astral-sh/ruff)
+
+The trend is decisive: Python tooling is consolidating around Rust-based solutions. This mirrors the success of `uv` (package manager) which hit 11% adoption in its first year. From the 2024 Python Developer Survey: *"Rust has enabled us to build highly performant tooling for Python... It's currently one of the biggest trends in Python."* [JetBrains](https://lp.jetbrains.com/python-developers-survey-2024/)
+
+## What to do right now
+
+**For new projects**: Use the Ruff-only configuration immediately. No migration needed, and you avoid the conflicts entirely.
+
+**For existing projects**: Run `ruff format` on a test branch to review differences. With >99.9% Black compatibility, most teams report only 200-300 trivial style changes across entire codebases. [GitHub +2](https://github.com/astral-sh/ruff/discussions/7310) Migrate incrementally: add Ruff for linting first, test the formatter second, then remove old dependencies.
+
+**Update your dependencies**: Remove `black`, `isort`, `flake8`, and related plugins. Add only `ruff`. [Astral](https://docs.astral.sh/ruff/faq/) [GitHub](https://github.com/astral-sh/ruff/blob/main/docs/faq.md) Your pyproject.toml becomes dramatically simpler and your CI pipeline runs **30-100x faster**. [Astral](https://astral.sh/blog/the-ruff-formatter)
+
+The conflicts you're experiencing exist because these tools were never designed to run together long-term. Ruff solves this by providing a unified, compatible implementation of all three tools in a single package. That's why the community has moved decisively in this direction for production codebases in 2024-2025.
